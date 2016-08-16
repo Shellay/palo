@@ -6,7 +6,7 @@ from collections import defaultdict as ddict
 ## =========================
 
 Var = namedtuple('Var', 'name')
-Var.__repr__ = lambda s: '?' + s.name
+Var.__repr__ = lambda s: s.name
 
 Cpd = namedtuple('Cpd', 'op args')
 Cpd.__repr__ = lambda s: (s.op) + repr(s.args)
@@ -212,6 +212,7 @@ class kbmeta(type):
 
         def __init__(self, name):
             self.name = name
+            self.followers = [self]
 
         def __setitem__(self, args, v):
             if not type(v) in (tuple, list):
@@ -222,10 +223,23 @@ class kbmeta(type):
 
         def __getitem__(self, args):
             c = Cpd(self.name, args)
+            self.term = c
             if any(isinstance(a, Var) for a in args):
                 return c
             else:
                 kbmeta.kb._add_fact(self.name, c)
+                return c
+
+        # operators
+        # def __call__(self, *args):
+        #     return self.__getitem__(args)
+        # def __and__(self, other):
+        #     self.followers.append(other)
+        #     return self
+        # def __le__(self, ts):
+        #     rule = (self.term, tuple(t.term for t in ts))
+        #     op = self.name
+        #     kbmeta.kb._add_rule(op, rule)
 
     class Reader(object):
 
