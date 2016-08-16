@@ -1,4 +1,4 @@
-from palo import var, kbmeta
+from yalog import var, kbmeta
 
 class kb(metaclass=kbmeta):
 
