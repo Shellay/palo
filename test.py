@@ -3,34 +3,34 @@ from yalog import var, kbmeta
 class kb(metaclass=kbmeta):
 
     # Facts
-    father['opa', 'pa']
-    mother['oma', 'pa']
-    father['pa', 'a']
-    father['pa', 'b']
-    mother['mum', 'a']
-    mother['mum', 'b']
+    father('ooopa', 'opa')
+    father('opa', 'ucl')
+    father('opa', 'pa')
+    mother('oma', 'pa')
+    father('pa', 'a')
+    father('pa', 'b')
+    mother('mum', 'a')
+    mother('mum', 'b')
 
-    not_eq['a', 'b']
-    not_eq['b', 'a']
+    # Definite clauses
+    grandfather(X, Y) <= \
+        father(X, Z) & father(Z, Y)
+    parent(X, Y) <= \
+        father(X, Y) |\
+        mother(X, Y)
+    sibling(X, Y) <= \
+        parent(Z, X) & parent(Z, Y) & (X != Y)
 
-    # Horn clauses
-    grandfather[X, Y] = father[X, Z], father[Z, Y]
-    parent[X, Y] = father[X, Y]
-    parent[X, Y] = mother[X, Y]
-    sibling[X, Y] = parent[Z, X], parent[Z, Y], not_eq[X, Y]
-
-    # # How to implement implicit equality?
-    # sibling[X, Y] = parent[Z, X], parent[Z, Y]
+    ancester(X, Y) <= father(X, Y)
+    ancester(X, Y) <= father(X, Z) & ancester(Z, Y)
 
 
 from pprint import pprint
 
-u = next(kb.sibling[var.X, 'b'])
-u1 = {var.X: 'a'}
-assert u == u1
+# q = kb.sibling(var.X, var.Y)
+# q = kb.sibling(var.a_sib, 'a')
+q = kb.sibling(var.x, var.y)
+pprint(list(q))
 
-# q = kb.sibling['a', var.X]
-q = kb.sibling['b', var.Z]
-# q = kb.sibling[var.X, var.Y]
-# q = kb.sibling[var.X, var.Y]
+q = kb.ancester(var.W, 'a')
 pprint(list(q))

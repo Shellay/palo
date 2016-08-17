@@ -1,4 +1,4 @@
-from collections import namedtuple
+from collections import namedtuple, deque
 from collections import defaultdict as ddict
 
 ## =========================
@@ -9,7 +9,10 @@ Var = namedtuple('Var', 'name')
 Var.__repr__ = lambda s: s.name
 
 Cpd = namedtuple('Cpd', 'op args')
-Cpd.__repr__ = lambda s: (s.op) + repr(s.args)
+Cpd.__repr__ = lambda s: '{}{}'.format(s.op, tuple(s.args))
+
+# Rule = namedtuple('Rule', 'csqt prms')
+# Rule.__repr__ = lambda s: '{{{} <= {}}}'.format(*s)
 
 
 class KB(object):
@@ -18,7 +21,7 @@ class KB(object):
         def __init__(self, kb, op):
             self.kb = kb
             self.op = op
-        def __getitem__(self, args):
+        def __call__(self, *args):
             qc = Cpd(self.op, args)
             yield from self.kb._ask(qc)
 
@@ -54,10 +57,12 @@ class KB(object):
 
     def _add_attr(self, k, v):
         setattr(self, k, v)
-    def _add_fact(self, name, fact):
+    def _add_fact(self, fact):
+        name = fact.op
         self._facts[name].append(fact)
-    def _add_rule(self, op, rule):
-        self._rules[op].append(rule)
+    def _add_rule(self, rule):
+        name = rule[0].op
+        self._rules[name].append(rule)
 
     def _has_fact(self, goal):
         return goal.op in self._facts
@@ -164,8 +169,23 @@ def bc_ask(kb, query):
         # Hide intermediate variables
         yield {k: u[k] for k in u if k in qvs}
 
+_NOT = 'not'
+_EQ = 'eq'
+_NE = 'not_eq'
+
 def bc_or(kb, goal, u):
-    if kb._has_fact(goal):
+    # How about when goal is eq(A, B), not_eq(A, B) and similar?
+    # - demodulation/paramodulation
+    # - equational unification
+    if goal.op == _EQ:
+        u1 = unify(*goal.args, u)
+        if not fails(u1):
+            yield u1
+    elif goal.op == _NE:
+        u1 = unify(*goal.args, u)
+        if fails(u1):
+            yield u
+    elif kb._has_fact(goal):
         for fact in kb[goal.op]:
             u1 = unify(fact, goal, u)
             if not fails(u1):
@@ -204,60 +224,73 @@ class _V(object):
 var = _V()
 
 
+class Expr(object):
+    def __init__(self, op1, op2):
+        self.op1 = op1; self.op2 = op2
+    def __and__(self, other):
+        return And(self, other)
+    def __or__(self, other):
+        return Or(self, other)
+class And(Expr): pass
+class Or(Expr): pass
+
+
+class Term(Expr):
+
+    def __init__(self, name):
+        self.name = name
+
+    def __call__(self, *args):
+        self.args = []
+        for arg in args:
+            if type(arg) in (Term, Var):
+                self.args.append(Var(arg.name))
+            else:
+                self.args.append(arg)
+        if all(type(x) != Var for x in self.args):
+            kbmeta.kb._add_fact(self.to_cpd())
+        return self
+
+    def __le__(self, other):
+        disj = deque()
+        while 1:
+            if type(other) is Or:
+                disj.appendleft(other.op2)
+                other = other.op1
+            else:
+                disj.appendleft(other)
+                break
+        for conj in disj:
+            seq = deque()
+            while 1:
+                if type(conj) is And:
+                    seq.appendleft(conj.op2)
+                    conj = conj.op1
+                else:
+                    seq.appendleft(conj)
+                    break
+            rule = (self.to_cpd(), tuple(map(Term.to_cpd, seq)))
+            kbmeta.kb._add_rule(rule)
+
+    def __eq__(self, other):
+        return Term(_EQ)(self, other)
+
+    def __ne__(self, other):
+        return Term(_NE)(self, other)
+
+    def to_cpd(self): return Cpd(self.name, tuple(self.args))
+
+
+class Reader(object):
+    def __setitem__(self, k, v): pass
+    def __getitem__(self, k): return Term(k)
+
 class kbmeta(type):
-
     kb = None
-
-    class Term(object):
-
-        def __init__(self, name):
-            self.name = name
-            self.followers = [self]
-
-        def __setitem__(self, args, v):
-            if not type(v) in (tuple, list):
-                v = (v,)
-            op = self.name
-            c = Cpd(op, args), v
-            kbmeta.kb._add_rule(op, c)
-
-        def __getitem__(self, args):
-            c = Cpd(self.name, args)
-            self.term = c
-            if any(isinstance(a, Var) for a in args):
-                return c
-            else:
-                kbmeta.kb._add_fact(self.name, c)
-                return c
-
-        # operators
-        # def __call__(self, *args):
-        #     return self.__getitem__(args)
-        # def __and__(self, other):
-        #     self.followers.append(other)
-        #     return self
-        # def __le__(self, ts):
-        #     rule = (self.term, tuple(t.term for t in ts))
-        #     op = self.name
-        #     kbmeta.kb._add_rule(op, rule)
-
-    class Reader(object):
-
-        def __setitem__(self, k, v):
-            kbmeta.kb._add_attr(k, v)
-
-        def __getitem__(self, k):
-            if str.isupper(k):
-                return Var(k)
-            else:
-                return kbmeta.Term(k)
-
     @classmethod
-    def __prepare__(mcls, n, b, **kw):
+    def __prepare__(cls, n, b, **kw):
         kbmeta.kb = KB()
-        return kbmeta.Reader()
+        return Reader()
+    def __new__(cls, n, b, kw):
+        return kbmeta.kb
 
-    def __new__(mcls, n, b, reader):
-        kb = kbmeta.kb
-        kbmeta.kb = None
-        return kb

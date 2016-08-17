@@ -48,3 +48,4 @@ Temporary Items
 *.pyc
 try*
 *.html
+*.python_history

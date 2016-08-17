@@ -55,3 +55,7 @@ note the repetition is valid due to the alternative rules for `parent` during in
 <!--
 The trick is to support `__getitem__` method for the `dict`-like reader returned by `kbmeta.__prepare__` so that any identifier get automatically declared and returned as a dedicated object.
 -->
+
+## TODO
+
+- Support goals defined with equality and non-equality.
