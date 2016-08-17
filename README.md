@@ -11,46 +11,62 @@ This is a mini-module for experimenting basic *datalog* within *Python* environm
 
 ## First Example
 
-A *KB* can be defined like with ease in *prolog*-style:
+A *KB* can be defined like with ease in *prolog*-like style:
 
 ``` python
-from yalog import kbmeta
+from yalog import var, kbmeta
 
 class kb(metaclass=kbmeta):
 
     # Facts
 
-    father['opa', 'pa']
-    mother['oma', 'pa']
-    father['pa', 'a']
-    father['pa', 'b']
-    mother['mum', 'a']
-    mother['mum', 'b']
-    not_eq['a', 'b']
-    not_eq['b', 'a']
+    father('ooopa', 'opa')
+    father('opa', 'ucl')
+    father('opa', 'pa')
+    mother('oma', 'pa')
+    father('pa', 'a')
+    father('pa', 'b')
+    mother('mum', 'a')
+    mother('mum', 'b')
 
-    # Horn clauses
+    # Definite clauses
 
-    grandfather[X, Y] = father[X, Z], father[Z, Y]
-    parent[X, Y] = father[X, Y]
-    parent[X, Y] = mother[X, Y]
-    sibling[X, Y] = parent[Z, X], parent[Z, Y], not_eq[X, Y]
+    grandfather(X, Y) <= \
+        father(X, Z) & father(Z, Y)
+    parent(X, Y) <= \
+        father(X, Y) |\
+        mother(X, Y)
+    sibling(X, Y) <= \
+        parent(Z, X) & parent(Z, Y) & (X != Y)
+
+    ancester(X, Y) <= father(X, Y)
+    ancester(X, Y) <= father(X, Z) & ancester(Z, Y)
 ```
 
-and goals can be queried by simply accessing `kb`\'s attributes with corresponding rule names:
+and goals can be queried by simply accessing attributes `kb` with corresponding rule names:
 
 ``` python
->>> from yalog import var
->>> q = kb.sibling[var.X, var.Y]
->>> list(q)
-[{X: 'a', Y: 'b'}, {X: 'b', Y: 'a'}, {X: 'a', Y: 'b'}, {X: 'b', Y: 'a'}]
+from yalog import var
 
->>> q = kb.sibling[var.Z, "b"]
+q = kb.sibling(var.X, var.Y)
+
 >>> list(q)
-[{Z: 'a'}, {Z: 'a'}]
+[{x: 'ucl', y: 'pa'},
+ {x: 'pa', y: 'ucl'},
+ {x: 'a', y: 'b'},
+ {x: 'b', y: 'a'},
+ {x: 'a', y: 'b'},
+ {x: 'b', y: 'a'}]
+
+q = kb.ancester(var.W, 'a')
+
+>>> list(q)
+[{W: 'pa'}, {W: 'ooopa'}, {W: 'opa'}]
 ```
 
-note the repetition is valid due to the alternative rules for `parent` during inferencing `sibling`.
+note the repetition in query results is valid due to the alternative rules for `parent` during inferencing `sibling`.
+
+Equality and non-equality are supported by extending the `back-chaining-OR` function.
 
 <!--
 The trick is to support `__getitem__` method for the `dict`-like reader returned by `kbmeta.__prepare__` so that any identifier get automatically declared and returned as a dedicated object.
@@ -58,4 +74,5 @@ The trick is to support `__getitem__` method for the `dict`-like reader returned
 
 ## TODO
 
-- Support goals defined with equality and non-equality.
+- Support `NOT` expressions in definite clauses.
+
