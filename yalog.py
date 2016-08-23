@@ -11,8 +11,8 @@ Var.__repr__ = lambda s: s.name
 Cpd = namedtuple('Cpd', 'op args')
 Cpd.__repr__ = lambda s: '{}{}'.format(s.op, tuple(s.args))
 
-# Rule = namedtuple('Rule', 'csqt prms')
-# Rule.__repr__ = lambda s: '{{{} <= {}}}'.format(*s)
+Rule = namedtuple('Rule', 'csqt prms')
+Rule.__repr__ = lambda s: '{{{} <= {}}}'.format(s.csqt, ', '.join(map(repr, s.prms)))
 
 
 class KB(object):
@@ -165,27 +165,60 @@ def occur_detect(v, z):
 def bc_ask(kb, query):
     stand_reset()
     qvs = set(vars_from(query))
-    for u in bc_or(kb, query, {}):
+    for u in bc_1(kb, query, {}):
         # Hide intermediate variables
         yield {k: u[k] for k in u if k in qvs}
+        # yield u
 
-_NOT = 'not'
-_EQ = 'eq'
-_NE = 'not_eq'
+def bc_1(kb, goal, u):
+    # if goal.op == 'not_':
+    #     yield from bc_not(kb, goal.args[0], u)
+    if goal.op == 'eq':
+        yield from bc_eq(kb, goal.args[0], goal.args[1], u)
+    elif goal.op == 'not_eq':
+        yield from bc_not_eq(kb, goal.args[0], goal.args[1], u)
+    else:
+        yield from bc_or(kb, goal, u)
+
+def bc_eq(kb, a1, a2, u):
+    u1 = unify(a1, a2, u)
+    if not fails(u1):
+        yield u1
+
+def bc_not(kb, goal, u):
+    """Negation-as-failure. This is a common limitation of prolog-like
+    systems.
+
+    May view resources like
+    `http://www.cs.toronto.edu/~ajuma/326f08/20Prolog5.pdf` to check
+    the details.
+
+    """
+    got = False
+    for u1 in bc_1(kb, goal, u):
+        got = True
+        break
+    if got:
+        yield FAIL
+
+def bc_not_eq(kb, a1, a2, u):
+    """Specialization of negation-as-failure."""
+    while type(a1) is Var:
+        if a1 not in u:
+            assert 0, 'No instance for {}.'.format(a1)
+        a1 = u[a1]
+    while type(a2) is Var:
+        if a2 not in u:
+            assert 0, 'No instance for {}.'.format(a2)
+        a2 = u[a2]
+    if a1 != a2:
+        yield u
 
 def bc_or(kb, goal, u):
     # How about when goal is eq(A, B), not_eq(A, B) and similar?
     # - demodulation/paramodulation
     # - equational unification
-    if goal.op == _EQ:
-        u1 = unify(*goal.args, u)
-        if not fails(u1):
-            yield u1
-    elif goal.op == _NE:
-        u1 = unify(*goal.args, u)
-        if fails(u1):
-            yield u
-    elif kb._has_fact(goal):
+    if kb._has_fact(goal):
         for fact in kb[goal.op]:
             u1 = unify(fact, goal, u)
             if not fails(u1):
@@ -206,7 +239,7 @@ def bc_and(kb, goals, u):
     elif not goals:
         yield u
     else:
-        for u1 in bc_or(kb, subst(u, goals[0]), u):
+        for u1 in bc_1(kb, subst(u, goals[0]), u):
             for u2 in bc_and(kb, goals[1:], u1):
                 yield u2
 
@@ -223,22 +256,13 @@ class _V(object):
         return Var(k)
 var = _V()
 
-
-class Expr(object):
-    def __init__(self, op1, op2):
-        self.op1 = op1; self.op2 = op2
-    def __and__(self, other):
-        return And(self, other)
-    def __or__(self, other):
-        return Or(self, other)
-class And(Expr): pass
-class Or(Expr): pass
-
-
-class Term(Expr):
+class Term(object):
 
     def __init__(self, name):
         self.name = name
+        self.args = []
+    def __repr__(self):
+        return '{}{}'.format(self.name, self.args or '')
 
     def __call__(self, *args):
         self.args = []
@@ -251,34 +275,15 @@ class Term(Expr):
             kbmeta.kb._add_fact(self.to_cpd())
         return self
 
-    def __le__(self, other):
-        disj = deque()
-        while 1:
-            if type(other) is Or:
-                disj.appendleft(other.op2)
-                other = other.op1
-            else:
-                disj.appendleft(other)
-                break
-        for conj in disj:
-            seq = deque()
-            while 1:
-                if type(conj) is And:
-                    seq.appendleft(conj.op2)
-                    conj = conj.op1
-                else:
-                    seq.appendleft(conj)
-                    break
-            rule = (self.to_cpd(), tuple(map(Term.to_cpd, seq)))
-            kbmeta.kb._add_rule(rule)
+    def __le__(self, seq):
+        if isinstance(seq, Term):
+            seq = (seq,)
+        rule = Rule(self.to_cpd(), tuple(map(Term.to_cpd, seq)))
+        kbmeta.kb._add_rule(rule)
 
-    def __eq__(self, other):
-        return Term(_EQ)(self, other)
 
-    def __ne__(self, other):
-        return Term(_NE)(self, other)
-
-    def to_cpd(self): return Cpd(self.name, tuple(self.args))
+    def to_cpd(self):
+        return Cpd(self.name, tuple(self.args))
 
 
 class Reader(object):

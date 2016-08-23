@@ -11,26 +11,41 @@ class kb(metaclass=kbmeta):
     father('pa', 'b')
     mother('mum', 'a')
     mother('mum', 'b')
+    mother('mum', 1)
 
     # Definite clauses
-    grandfather(X, Y) <= \
-        father(X, Z) & father(Z, Y)
-    parent(X, Y) <= \
-        father(X, Y) |\
-        mother(X, Y)
-    sibling(X, Y) <= \
-        parent(Z, X) & parent(Z, Y) & (X != Y)
+    grandfather(X, Y) <= [
+        father(X, Z), father(Z, Y)
+    ]
+    parent(X, Y) <= father(X, Y)
+    parent(X, Y) <= mother(X, Y)
+
+    sibling(X, Y) <= [
+        parent(Z, X), parent(Z, Y), not_eq(X, Y)
+        # Applying not_eq to yet instantiated variables lead to failure.
+        # This means, UNSAFE query is hereby directly rejected.
+        # i.e. 
+        # not_eq(X, Y), parent(Z, X), parent(Z, Y)
+    ]
 
     ancester(X, Y) <= father(X, Y)
-    ancester(X, Y) <= father(X, Z) & ancester(Z, Y)
+    ancester(X, Y) <= [
+        father(X, Z), ancester(Z, Y)
+    ]
 
 
 from pprint import pprint
 
+pprint(kb)
+
 # q = kb.sibling(var.X, var.Y)
 # q = kb.sibling(var.a_sib, 'a')
+print('=== siblings ===')
 q = kb.sibling(var.x, var.y)
+# q = kb.sibling(var.x, 'a')
 pprint(list(q))
 
+print()
+print('=== ancesters ===')
 q = kb.ancester(var.W, 'a')
 pprint(list(q))
