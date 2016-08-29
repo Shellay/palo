@@ -31,16 +31,22 @@ class kb(metaclass=kbmeta):
 
     # Definite clauses
 
-    grandfather(X, Y) <= \
-        father(X, Z) & father(Z, Y)
-    parent(X, Y) <= \
-        father(X, Y) |\
-        mother(X, Y)
-    sibling(X, Y) <= \
-        parent(Z, X) & parent(Z, Y) & (X != Y)
+    grandfather(X, Y) <= [
+        father(X, Z), father(Z, Y)
+    ]
+
+    parent(X, Y) <= father(X, Y)
+    parent(X, Y) <= mother(X, Y)
+
+    sibling(X, Y) <= [
+        parent(Z, X) , parent(Z, Y) , (X != Y)
+    ]
 
     ancester(X, Y) <= father(X, Y)
-    ancester(X, Y) <= father(X, Z) & ancester(Z, Y)
+    ancester(X, Y) <= [
+        father(X, Z), ancester(Z, Y)
+    ]
+
 ```
 
 and goals can be queried by simply accessing attributes `kb` with corresponding rule names:
