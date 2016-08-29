@@ -1,4 +1,4 @@
-from yalog import var, kbmeta
+from yalog import kbmeta, var, new_vars
 
 class kb(metaclass=kbmeta):
 
@@ -33,6 +33,9 @@ class kb(metaclass=kbmeta):
         father(X, Z), ancester(Z, Y)
     ]
 
+    # fac(0, F) <= eq(1, F)
+    # fac(N, F) <= [fac(sub(N, 1), F_1), eq(mul(F_1, N), F)]
+
 
 from pprint import pprint
 
@@ -49,3 +52,10 @@ print()
 print('=== ancesters ===')
 q = kb.ancester(var.W, 'a')
 pprint(list(q))
+
+
+print()
+with new_vars(3) as (X, Y, Z):
+    # print(X, Y, Z)
+    pass
+

@@ -81,15 +81,20 @@ def vars_from(q):
     elif type(q) in (tuple, list):
         for vs in map(vars_from, q):
             yield from vs
+    elif type(q) == Rule:
+        yield from vars_from(q.csqt)
+        yield from vars_from(q.prms)
 
-def subst(u, e, ctr=None):
+def subst(u, e):
     if type(e) == Var:
         if e in u: return u[e]
         else: return e
     elif type(e) == Cpd:
-        return Cpd(e.op, tuple(subst(u, a, ctr) for a in e.args))
+        return Cpd(e.op, tuple(subst(u, a) for a in e.args))
     elif type(e) in (tuple, list):
         return tuple(subst(u, x) for x in e)
+    elif type(e) == Rule:
+        return Rule(subst(u, e.csqt), subst(u, e.prms))
     else:
         return e
 
@@ -97,7 +102,7 @@ def subst(u, e, ctr=None):
 from itertools import count
 
 std_ctr = count()
-def stand_vars(rule):
+def stand_apart(rule):
     vs = set(vars_from(rule))
     u = {}
     for i, v in zip(std_ctr, vs):
@@ -167,8 +172,8 @@ def bc_ask(kb, query):
     qvs = set(vars_from(query))
     for u in bc_1(kb, query, {}):
         # Hide intermediate variables
-        yield {k: u[k] for k in u if k in qvs}
         # yield u
+        yield {k: u[k] for k in u if k in qvs}
 
 def bc_1(kb, goal, u):
     # if goal.op == 'not_':
@@ -194,15 +199,13 @@ def bc_not(kb, goal, u):
     the details.
 
     """
-    got = False
     for u1 in bc_1(kb, goal, u):
-        got = True
-        break
-    if got:
+        # Loop entered -> goal proved -> neg-fail
         yield FAIL
 
 def bc_not_eq(kb, a1, a2, u):
     """Specialization of negation-as-failure."""
+    # Directly report non-instantiation.
     while type(a1) is Var:
         if a1 not in u:
             assert 0, 'No instance for {}.'.format(a1)
@@ -213,23 +216,28 @@ def bc_not_eq(kb, a1, a2, u):
         a2 = u[a2]
     if a1 != a2:
         yield u
+    # # Alternatively, can't prove -> failure.
+    # if fails(unify(a1, a2, u)):
+    #     yield u
 
 def bc_or(kb, goal, u):
-    # How about when goal is eq(A, B), not_eq(A, B) and similar?
-    # - demodulation/paramodulation
-    # - equational unification
     if kb._has_fact(goal):
         for fact in kb[goal.op]:
             u1 = unify(fact, goal, u)
             if not fails(u1):
                 yield u1
     elif kb._has_rule(goal):
-        for csqt, prms in kb[goal.op]:
-            if not fails(unify(csqt, goal)):
-                csqt, prms = stand_vars((csqt, prms))
-                u1 = unify(csqt, goal, u)
-                for u2 in bc_and(kb, prms, u1):
-                    yield u2
+        # for c, ps in kb[goal.op]:
+            # if not fails(unify(csqt, goal)):
+            #     csqt, prms = stand_apart((csqt, prms))
+            #     u1 = unify(csqt, goal, u)
+            #     for u2 in bc_and(kb, prms, u1):
+            #         yield u2
+        for rule in kb[goal.op]:
+            csqt, prms = stand_apart(rule)
+            u1 = unify(csqt, goal, u)
+            for u2 in bc_and(kb, prms, u1):
+                yield u2
     else:
         raise KeyError('No defined rules match {}'.format(repr(goal)))
 
@@ -254,7 +262,20 @@ KB._ask = bc_ask
 class _V(object):
     def __getattr__(self, k):
         return Var(k)
+
 var = _V()
+
+class _NV(object):
+    def __init__(self, n):
+        self.n = n
+    def __enter__(self):
+        for i in range(self.n):
+            yield Var('#_{}'.format(i))
+    def __exit__(self, *a, **kw):
+        pass
+
+new_vars = _NV
+        
 
 class Term(object):
 
@@ -281,7 +302,6 @@ class Term(object):
         rule = Rule(self.to_cpd(), tuple(map(Term.to_cpd, seq)))
         kbmeta.kb._add_rule(rule)
 
-
     def to_cpd(self):
         return Cpd(self.name, tuple(self.args))
 
@@ -289,6 +309,7 @@ class Term(object):
 class Reader(object):
     def __setitem__(self, k, v): pass
     def __getitem__(self, k): return Term(k)
+
 
 class kbmeta(type):
     kb = None
