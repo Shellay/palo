@@ -140,7 +140,6 @@ class Func(Term):
     def can_eval(self):
         return all(type(a) not in (Var, Func) for a in self.args)
 
-
 def Assert(func):
     return Eq(True, func)
 
@@ -149,6 +148,9 @@ def easy(cls):
     class _E(object):
         def __getattr__(self, k):
             return cls(k)
+        def __call__(self, n):
+            for i in range(n):
+                yield cls(str(i))
     cls.new = _E()
     # return cls
     return cls.new
@@ -172,49 +174,80 @@ def unify(x, y, u={}):
     elif x == y:
         return u
     # - Variable Term: v=v, v=c|v=f, c=f|v=f
-    elif type(x) == Var:
+    elif isinstance(x, Var):
         return unify_var(x, y, u)
-    elif type(y) == Var:
+    elif isinstance(y, Var):
         return unify_var(y, x, u)
     # - Functional Term: f=f, f=c|c=f
-    # 
     # FIXME: To suppress the need with cases involving Func, keep
     # every targeted Func instance evaluated before entering `unify`.
-    elif type(x) == Func or type(y) == Func:
-        raise ValueError('Unsupport unification for unevaluated Func.')
+    elif isinstance(x, Func) or isinstance(y, Func):
+        raise ValueError('Unsupported unification for unevaluated Func object.')
+    # FIXME: Support Compound Term in the future maybe.
+    # - Can Func be treated as specialized Compound Term?
+    # elif isinstance(x, TermCnpd) and isinstance(y, TermCnpd):
+    #     raise NotImplementedError
 
     # unify Atomic Sentence
     # - Eq/NotEq
     #   Verify both to be true?
     # - User Predicate
-    elif type(x) == type(y) == Pred:
+    elif isinstance(x, Pred) and isinstance(y, Pred):
         if x.verb != y.verb:
             return FAIL
-        # Allow variable to bind to any predicate verb, i.e. allow
-        # variable to represent Relations (predicate symbols, verbs)
-        # besides Constants (subjective/objective)?
+        # FIXME: Whether to allow variable to bind to any predicate
+        # verb, i.e. to allow variable to represent Relations
+        # (predicate symbols, verbs) besides Constants
+        # (subjective/objective)?
+        # 
         # u = unify(x.verb, y.verb, u)
+        if len(x.terms) != len(y.terms):
+            raise ValueError('Arity mismatch: {} =?= {}'.format(x, y))
         for a, b in zip(x.terms, y.terms):
             u = unify(a, b, u)
             if u is FAIL: break
         return u
 
     # unify Complex Sentence
+
+    # FIXME: These sentences can only be unified after
+    # evaluation. Unification successes iff both sides have the same
+    # truth value.
     elif isinstance(x, Sen) and isinstance(y, Sen):
         if type(x) == type(y):
             for a, b in zip(x.subs, y.subs):
                 u = unify(a, b, u)
                 if u is FAIL: break
-        return FAIL
+            return u
+        else:
+            return FAIL
 
-    # type inconsistent
+    # FAIL: type inconsistent
     else:
         return FAIL
 
+
+def occurs_in(v, x):
+    "Occurence check."
+    assert isinstance(v, Var)
+    if isinstance(x, Var):
+        # Unifiable whether they are equal.
+        return False
+    elif isinstance(x, Pred):
+        return any(occurs_in(v, y) for y in x.terms)
+    else:
+        # Func, Sen ...
+        return False
+
+
 def unify_var(v, z, u):
     "Try append a consistent binding `v: z` into unifier `u`."
-    assert type(v) == Var
+    assert isinstance(v, Var)
     if u is FAIL:
+        return FAIL
+    elif isinstance(z, Var) and v == z:
+        return u
+    elif occurs_in(v, z):
         return FAIL
     elif v in u:
         return unify(u[v], z, u)
@@ -223,6 +256,7 @@ def unify_var(v, z, u):
     else:
         u1 = dict(u); u1[v] = z
         return u1
+
 
 def vars_from(x, m=None):
     if m is None: m = set()
@@ -265,8 +299,10 @@ def subst(u, x):
         # Constant
         return x
 
+
 from itertools import count
 stand_count = count()
+
 def univ_inst(x, u=None):
     "Instantiate ScmVar to Var."
     # assert isinstance(x, (ScmVar, Sen)), type(x)
@@ -319,13 +355,15 @@ class KB(object):
         if isinstance(sen, SenAtom):
             if isinstance(sen, Pred):
                 self.add_fact(sen)
-            elif isinstance(sen, Eq): pass
-            elif isinstance(sen, NotEq): pass
+            elif isinstance(sen, Eq):
+                raise NotImplementedError
+            elif isinstance(sen, NotEq):
+                raise NotImplementedError
             else: raise
         elif isinstance(sen, Rule):
             self.add_rule(sen)
         elif isinstance(sen, (And, Or, Not)):
-            raise NotImplemented
+            raise NotImplementedError
 
     def has_fact(self, pred):
         return pred.verb in self.facts
@@ -433,88 +471,87 @@ class KB(object):
             pass
 
 
-# Test
 
-kb = KB()
+# === Front-end ===
+# - Supply tricky sugar for using KB functionalities neatly.
 
-# Pred(str:<verb>, str:<Const>, str:<Const>)
-# kb.tell(pred.father('pap', 'a'))
-# kb.tell(father=[])
-
-kb.tell(Pred('father', 'pap', 'a'))
-kb.tell(Pred('father', 'pap', 'b'))
-kb.tell(Pred('mother', 'mum', 'a'))
-kb.tell(Pred.new.mother('mum', 'b'))
-kb.tell(pred.father('opa', 'pap'))
-kb.tell(pred.mother('oma', 'pap'))
-kb.tell(Pred('sibling', ScmVar('x'), ScmVar('y'))
-        <=
-        Pred('father', ScmVar('z'), ScmVar('x')) &
-        Pred('father', ScmVar('z'), ScmVar('y')) &
-        NotEq(ScmVar('x'), ScmVar('y'))
-)
-
-kb.tell(
-    pred.ancester(scm.x, scm.y)
-    <=
-    pred.father(scm.x, scm.y)
-)
-# kb.tell(
-#     Pred('ancester', ScmVar('x'), ScmVar('y'))
-#     <=
-#     Pred('father', ScmVar('x'), ScmVar('y'))
-# )
-kb.tell(
-    Pred('ancester', scm.x, scm.y)
-    <=
-    Pred('father', scm.x, scm.z) &
-    Pred('ancester', scm.z, scm.y)
-)
-
-from pprint import pprint
-pprint(kb)
-
-q = kb.ask(Pred('father', Var('x'), Var('y')))
-pprint(list(q))
-
-print('========== sibling ==========')
-q = kb.ask(Pred('sibling', Var('x'), Var('y')))
-pprint(list(q))
-
-q = kb.ask(Pred('sibling', Var('x'), Var('y')))
-pprint(list(q))
-
-print('========== ancester ==========')
-q = kb.ask(Pred('ancester', var.U, var.V))
-pprint(list(q))
-
-print('========== factorial ==========')
-# q = kb.ask(Pred('factorial', 0, var.W))
-import operator as op
-
-kb.tell(
-    Pred('factorial', 0, 1)
-)
-kb.tell(
-    Pred('factorial', scm.x, scm.y)
-    <=
-    Assert(Func(op.gt, scm.x, -1)) &
-    Pred('factorial', Func(op.sub, scm.x, 1), scm.y1) &
-    Eq(scm.y, Func(op.mul, scm.x, scm.y1))
-)
-# Dead loop when asking for more than one answer...
-# Since it is not ruled out that (scm.x > -1)
-# Eq(True, Func(...)) can do the trick
-
-q = kb.ask(Pred('factorial', 2, var.W))
-pprint(list(q))
-q = kb.ask(Pred('factorial', 5, var.W))
-pprint(list(q))
+class PredM(Pred):
+    "Subtyping `Pred` to support adding instance into KB."
+    def __init__(self, verb, kb=None):
+        self.verb = verb
+        self.kb = kb
+    def __le__(self, other):
+        r = super(PredM, self).__le__(other)
+        self.kb.tell(r)
+    def __call__(self, *terms):
+        # super(PredM, self).__call__(*terms) # set attribute `terms`
+        self.terms = terms
+        if all(not isinstance(t, ScmVar) for t in terms):
+            self.kb.tell(self)
+        return self
 
 
-print('========== more tinies ==========')
-kb.tell(pred.gt5(scm.x) <= Assert(Func(op.gt, scm.x, 5)))
-q = kb.ask(pred.gt5(8))
-pprint(list(q))
-q = kb.ask(pred.gt5(4))
-pprint(list(q))
+class KBMan(object):
+
+    """KB-Manager simplifies adding facts/rules.
+
+    Example declarations:
+
+        k = KBMan()
+        k.father('John', 'Lucy')
+        k.father('Andreas', 'John')
+        k.ancester(scm.x, scm.y) <= k.father(scm.x, scm.y)
+        k.ancester(scm.x, scm.y) <= (
+            k.father(scm.x, scm.z) &
+            k.ancester(scm.z, scm.y)
+        )
+
+    Example queries:
+    
+        >>> q = k.query
+        >>> q1 = q.ancester(var.x, 'Lucy')
+        >>> next(q1)
+        {$x: 'John'}
+        >>> next(q1)
+        {$x: 'Andreas'}
+        >>> next(q1)
+        Traceback (most recent call last):
+        File "<stdin>", line 1, in <module>
+        StopIteration
+
+    """
+
+    class QueryMan(object):
+        def __init__(self, kb):
+            self._kb = kb
+        def __getattr__(self, k):
+            if k in self.__dict__:
+                return object.__getattr__(self, k)
+            else:
+                kb = self._kb
+                if k in kb.facts or k in kb.rules:
+                    def q(*args):
+                        args1 = []
+                        # Convert uppercase str to Var.
+                        for arg in args:
+                            if isinstance(arg, str) and \
+                               arg.isupper():
+                                args1.append(Var(arg))
+                            else:
+                                args1.append(arg)
+                        yield from self._kb.ask(Pred(k, *args1))
+                    q.__doc__ = "Query with keyword {}.".format(repr(k))
+                    return q
+                else:
+                    raise ValueError('Unrecognized predicate to be queried.')
+
+    def __init__(self):
+        kb = KB()
+        self._kb = kb
+        self.query = KBMan.QueryMan(kb)
+
+    def __getattr__(self, k):
+        if k in self.__dict__:
+            return object.__getattr__(self, k)
+        else:
+            return PredM(k, kb=self._kb)
