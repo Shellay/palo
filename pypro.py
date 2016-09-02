@@ -94,6 +94,15 @@ class Term(object):
     def __init__(self, *a, **kw):
         raise NotImplementedError('Need override constructor in derived subclasses.')
 
+class TermCnpd(Term):
+    def __init__(self, con, *terms):
+        self.con = con
+        self.terms = terms
+    def __repr__(self):
+        return '{}{}'.format(self.con, self.terms)
+    def __call__(self, *terms):
+        self.terms = terms
+
 class Var(Term):
     def __init__(self, symbol):
         self.symbol = symbol
@@ -160,7 +169,7 @@ scm = easy(ScmVar)
 pred = easy(Pred)
 
 
-# === Unification | Substitution | Evaluation ===
+# === Unification | Substitution*Evaluation ===
 
 FAIL = '-FAIL-'
 
@@ -173,20 +182,32 @@ def unify(x, y, u={}):
     # - Constant Term: c=c
     elif x == y:
         return u
+    elif isinstance(x, list) and isinstance(y, list) or \
+         isinstance(x, tuple) and isinstance(y, tuple):
+        for a, b in zip(x, y):
+            u = unify(a, b, u)
+            if u is FAIL: break
+        return u
+        
     # - Variable Term: v=v, v=c|v=f, c=f|v=f
     elif isinstance(x, Var):
         return unify_var(x, y, u)
     elif isinstance(y, Var):
         return unify_var(y, x, u)
+
     # - Functional Term: f=f, f=c|c=f
     # FIXME: To suppress the need with cases involving Func, keep
     # every targeted Func instance evaluated before entering `unify`.
     elif isinstance(x, Func) or isinstance(y, Func):
         raise ValueError('Unsupported unification for unevaluated Func object.')
+
+    # - Compound Term
     # FIXME: Support Compound Term in the future maybe.
     # - Can Func be treated as specialized Compound Term?
-    # elif isinstance(x, TermCnpd) and isinstance(y, TermCnpd):
-    #     raise NotImplementedError
+    elif isinstance(x, TermCnpd) and isinstance(y, TermCnpd):
+        if x.con != y.con:
+            return FAIL
+        return unify(x.terms, y.terms, u)
 
     # unify Atomic Sentence
     # - Eq/NotEq
@@ -203,10 +224,7 @@ def unify(x, y, u={}):
         # u = unify(x.verb, y.verb, u)
         if len(x.terms) != len(y.terms):
             raise ValueError('Arity mismatch: {} =?= {}'.format(x, y))
-        for a, b in zip(x.terms, y.terms):
-            u = unify(a, b, u)
-            if u is FAIL: break
-        return u
+        return unify(x.terms, y.terms, u)
 
     # unify Complex Sentence
 
@@ -215,30 +233,26 @@ def unify(x, y, u={}):
     # truth value.
     elif isinstance(x, Sen) and isinstance(y, Sen):
         if type(x) == type(y):
-            for a, b in zip(x.subs, y.subs):
-                u = unify(a, b, u)
-                if u is FAIL: break
-            return u
+            return unify(x.subs, y.subs, u)
         else:
-            return FAIL
+            raise NotImplementedError()
 
     # FAIL: type inconsistent
     else:
         return FAIL
 
-
 def occurs_in(v, x):
     "Occurence check."
     assert isinstance(v, Var)
     if isinstance(x, Var):
-        # Unifiable whether they are equal.
+        # Unifiable whether they are equal Var.
         return False
+    elif isinstance(x, TermCnpd):
+        return any(occurs_in(v, y) for y in x.terms)
     elif isinstance(x, Pred):
         return any(occurs_in(v, y) for y in x.terms)
     else:
-        # Func, Sen ...
         return False
-
 
 def unify_var(v, z, u):
     "Try append a consistent binding `v: z` into unifier `u`."
@@ -248,7 +262,8 @@ def unify_var(v, z, u):
     elif isinstance(z, Var) and v == z:
         return u
     elif occurs_in(v, z):
-        return FAIL
+        raise ValueError('Occurence found.')
+        # return FAIL
     elif v in u:
         return unify(u[v], z, u)
     elif z in u:
@@ -256,25 +271,7 @@ def unify_var(v, z, u):
     else:
         u1 = dict(u); u1[v] = z
         return u1
-
-
-def vars_from(x, m=None):
-    if m is None: m = set()
-    if isinstance(x, Var):
-        if x not in m:
-            m.add(x)
-            yield x
-    elif isinstance(x, Func):
-        for arg in x.args:
-            yield from vars_from(arg, m)
-    elif isinstance(x, Pred):
-        for term in x.terms:
-            yield from vars_from(term, m)
-    elif isinstance(x, Sen):
-        for sub in x.subs:
-            yield from vars_from(sub, m)
         
-
 def subst(u, x):
     """Substitute `u[x]` for `x` recursively.
 
@@ -282,19 +279,25 @@ def subst(u, x):
     kind of 'substitute'
 
     """
+    # Term
     if isinstance(x, Var):
         if x in u: return u[x]
         else:      return x
+    elif isinstance(x, TermCnpd):
+        return TermCnpd(x.con, *[subst(u, y) for y in x.terms])
+    elif isinstance(x, Func):
+        # Eval func here after post-order construction.
+        f = Func(x.op, *(subst(u, a) for a in x.args))
+        if f.can_eval():
+            return f.eval()
+        else:
+            return f
+    # Sentence
     elif isinstance(x, Pred):
         return Pred(x.verb, *(subst(u, y) for y in x.terms))
     elif isinstance(x, Sen):
         return type(x)(*[subst(u, y) for y in x.subs])
-    elif isinstance(x, Func):
-        # Eval func here?
-        # Post-order here!
-        f = Func(x.op, *(subst(u, a) for a in x.args))
-        if f.can_eval(): return f.eval()
-        else:            return f
+    # Constant term
     else:
         # Constant
         return x
@@ -302,17 +305,17 @@ def subst(u, x):
 
 from itertools import count
 stand_count = count()
-
 def univ_inst(x, u=None):
     "Instantiate ScmVar to Var."
-    # assert isinstance(x, (ScmVar, Sen)), type(x)
     if u is None: u = {}
     if isinstance(x, ScmVar):
         if x not in u:
-            u[x] = Var('{}_{}'.format(x.mark, next(stand_count)))
+            u[x] = Var('{}_#{}'.format(x.mark, next(stand_count)))
         return u[x]
     elif isinstance(x, Var):
         raise
+    elif isinstance(x, TermCnpd):
+        return TermCnpd(x.con, *(univ_inst(y, u) for y in x.terms))
     elif isinstance(x, Func):
         return Func(x.op, *(univ_inst(a, u) for a in x.args))
     elif isinstance(x, Pred):
@@ -365,8 +368,8 @@ class KB(object):
         elif isinstance(sen, (And, Or, Not)):
             raise NotImplementedError
 
-    def has_fact(self, pred):
-        return pred.verb in self.facts
+    def has_fact(self, key):
+        return key in self.facts
     def add_fact(self, pred):
         if pred.key not in self.facts:
             self.facts[pred.key] = []
@@ -375,8 +378,8 @@ class KB(object):
         if symbol in self.facts:
             yield from self.facts[symbol]
 
-    def has_rule(self, pred):
-        return pred.key in self.rules
+    def has_rule(self, key):
+        return key in self.rules
     def add_rule(self, rule):
         if rule.key not in self.rules:
             self.rules[rule.key] = []
@@ -388,9 +391,23 @@ class KB(object):
     # ASK
     def ask(kb, goal):
         stand_reset()
-        vs = set(vars_from(goal))
+        # vs = set(vars_from(goal))
         for u in kb.ask_1(goal, {}):
-            yield {v: u[v] for v in vs}
+            # yield {v: u[v] for v in vs}
+            # yield u
+            u1 = {}
+            for k, v in u.items():
+                # Find root for each variable.
+                while v in u:
+                    v = u[v]
+                # Not generated variable.
+                if '#' not in k.symbol:
+                    # Final substitution:
+                    # - Each generated variable is already in `u`.
+                    # - And already refers to the root in `u`.
+                    # - Substitute sub-terms which are variables.
+                    u1[k] = subst(u, v)
+            yield u1
 
     # Dispatch ASK
     def ask_1(kb, goal0, u):
@@ -454,7 +471,7 @@ class KB(object):
         if not any(kb.ask_1(goal, u)):
             yield u
 
-    # Ask for simple goal.
+    # Ask for simple Predicate.
     def ask_fact(kb, goal, u):
         for fact in kb.get_facts(goal.key):
             u1 = unify(fact, goal, u)
@@ -464,19 +481,22 @@ class KB(object):
     def ask_rule(kb, goal, u):
         for rule in kb.get_rules(goal.key):
             rule1 = univ_inst(rule)
-            u1 = unify(rule1.lhs, goal, u)
-            if u1 is not FAIL:
-                yield from kb.ask_and(rule1.rhs, u1)
-            # Retract standardized-apart-counter?
-            pass
-
+            if isinstance(rule, Rule):
+                u1 = unify(rule1.lhs, goal, u)
+                if u1 is not FAIL:
+                    yield from kb.ask_and(rule1.rhs, u1)
+                # Retract standardized-apart-counter?
+                pass
+            else:
+                # Singleton rule like k.append(NIL, scm.y, scm.y)
+                yield from kb.ask_1(rule1, u)
 
 
 # === Front-end ===
 # - Supply tricky sugar for using KB functionalities neatly.
 
 class PredM(Pred):
-    "Subtyping `Pred` to support adding instance into KB."
+    "Subtyping `Pred` to support adding instance into KB when called."
     def __init__(self, verb, kb=None):
         self.verb = verb
         self.kb = kb
@@ -535,7 +555,8 @@ class KBMan(object):
                         # Convert uppercase str to Var.
                         for arg in args:
                             if isinstance(arg, str) and \
-                               arg.isupper():
+                               (arg.isupper() or\
+                                arg.startswith('$')):
                                 args1.append(Var(arg))
                             else:
                                 args1.append(arg)
@@ -555,3 +576,10 @@ class KBMan(object):
             return object.__getattr__(self, k)
         else:
             return PredM(k, kb=self._kb)
+
+
+class builtins:
+    Eq = Eq
+    NotEq = NotEq
+    Func = Func
+    Assert = Assert

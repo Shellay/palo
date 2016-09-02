@@ -1,4 +1,5 @@
-from pypro import KBMan, NotEq, scm, var, Assert, Func, Eq
+from pypro import KBMan, NotEq, scm, var, Assert, Func, Eq, TermCnpd
+from pprint import pprint
 
 
 k = KBMan()
@@ -10,7 +11,7 @@ k.mother('mum', 'a')
 k.father('pap', 'b')
 k.mother('mum', 'b')
 
-x, y, z = scm(3)
+x, y, z, w = scm(4)
 
 k.sibling(x, y) <= (
     k.father(z, x) &
@@ -40,3 +41,38 @@ k.factorial(x, y) <= (
 r = q.factorial(4, var.w)
 # r = q.factorial(4)
 print(list(r))
+
+Cons = lambda car, cdr: TermCnpd('Cons', car, cdr)
+NIL = None
+
+# from pypro import unify
+# u = unify(Cons(1, Cons(2, NIL)), Cons(var.x, var.y))
+# print((u))
+# u = unify([1, 2, 3], [var.x, var.y, var.z])
+# print((u))
+# assert 0
+
+
+# Is this a fact??
+# k.append(NIL, scm.y, scm.y)
+k.append(NIL, scm.y, scm.z) <= Eq(scm.y, scm.z)
+
+# k.append(Cons(scm.x, scm.xs), scm.y, scm.z) <=\
+#     k.append(scm.xs, scm.y, scm.zs) &\
+#     Eq(scm.z, Cons(scm.x, scm.zs))
+
+k.append(Cons(scm.x, scm.xs), scm.y, Cons(scm.x, scm.zs)) <=\
+    k.append(scm.xs, scm.y, scm.zs)
+
+
+r = q.append(NIL, Cons(3, NIL), var.z)
+pprint(list(r))
+r = q.append(Cons(1, NIL), Cons(3, NIL), var.z)
+pprint(list(r))
+# r = q.append(Cons(1, Cons(2, NIL)), Cons(3, NIL), var.z)
+# pprint(list(r))
+
+
+# Named compound term?
+
+
