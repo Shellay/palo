@@ -3,15 +3,15 @@ from yalog import kbmeta, var, new_vars
 class kb(metaclass=kbmeta):
 
     # Facts
-    father('ooopa', 'opa')
-    father('opa', 'ucl')
-    father('opa', 'pa')
-    mother('oma', 'pa')
-    father('pa', 'a')
-    father('pa', 'b')
-    mother('mum', 'a')
-    mother('mum', 'b')
-    mother('mum', 1)
+    father < ('ooopa', 'opa')
+    father < ('opa', 'ucl')
+    father < ('opa', 'pa')
+    mother < ('oma', 'pa')
+    father < ('pa', 'a')
+    father < ('pa', 'b')
+    mother < ('mum', 'a')
+    mother < ('mum', 'b')
+    mother < ('mum', 1)
 
     # Definite clauses
     grandfather(X, Y) <= [
